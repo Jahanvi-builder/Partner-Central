@@ -125,14 +125,6 @@ const fieldGuidance: Partial<Record<keyof OfferDraft, FieldGuidance>> = {
     hint: "Enter the amount in ₹ without commas or a currency symbol.",
   },
   fulfilment: { placeholder: "e.g. Digital subscription · 1 year" },
-  webhookUrl: {
-    placeholder: "https://api.yourcompany.com/pine/activation",
-    hint: "HTTPS endpoint that receives activation events from Pine.",
-  },
-  activationSla: {
-    placeholder: "e.g. 4",
-    hint: "Maximum activation time in hours.",
-  },
   postTrialPrice: { placeholder: "e.g. ₹1,299/month after the trial" },
   contactSla: {
     placeholder: "e.g. 48",
@@ -197,8 +189,6 @@ const sectionForField: Record<string, OfferSectionId> = {
   sku: "fulfilment",
   price: "fulfilment",
   fulfilment: "fulfilment",
-  webhookUrl: "fulfilment",
-  activationSla: "fulfilment",
   postTrialPrice: "fulfilment",
   contactSla: "fulfilment",
   regulatedEntity: "bundle-terms",
@@ -257,16 +247,6 @@ export function validateOfferDraft(draft: OfferDraft): Errors {
     if (!draft.sku.trim()) errors.sku = "Required";
     if (Number(draft.price) <= 0) errors.price = "Enter a positive price";
     if (!draft.fulfilment.trim()) errors.fulfilment = "Required";
-    if (draft.activationMode === "webhook") {
-      try {
-        if (new URL(draft.webhookUrl).protocol !== "https:") throw new Error();
-      } catch {
-        errors.webhookUrl = "Use a valid HTTPS URL";
-      }
-      if (Number(draft.activationSla) <= 0) {
-        errors.activationSla = "Enter a positive SLA";
-      }
-    }
   }
 
   if (draft.type === "lead-gen") {
@@ -806,31 +786,26 @@ function ProductSections({
 
   if (draft.type === "direct-buy") {
     return (
-      <SectionCard id="fulfilment" title="Product & fulfilment" description="Configure the product, price, and activation." tags={["SKU", "Price", "Activation"]}>
+      <SectionCard id="fulfilment" title="Product & fulfilment" description="Configure the product, price, and what happens after payment." tags={["SKU", "Price", "Fulfilment"]}>
         <div className="grid gap-4 md:grid-cols-3">
           {input("sku", "Product SKU")}
           {input("price", "Price (₹)", "number")}
           {input("fulfilment", "Fulfilment type")}
           <div className="space-y-2 md:col-span-3">
-            <Label className="text-xs">Activation mode <span className="text-destructive">*</span></Label>
+            <Label className="text-xs">What happens after payment? <span className="text-destructive">*</span></Label>
             <div className="flex flex-wrap gap-2">
               {[
-                ["immediate", "Auto-activate immediately"],
-                ["webhook", "Wait for webhook callback"],
+                ["instant", "Instant access after payment"],
+                ["partner-managed", "Partner-managed fulfilment"],
               ].map(([value, label], index) => (
                 <label key={value} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                  <input id={index === 0 ? "activationMode" : undefined} type="radio" checked={draft.activationMode === value} onChange={() => update("activationMode", value)} />
+                  <input id={index === 0 ? "fulfilmentMode" : undefined} type="radio" checked={draft.fulfilmentMode === value} onChange={() => update("fulfilmentMode", value)} />
                   {label}
                 </label>
               ))}
             </div>
+            <p className="text-xs text-muted-foreground">Partner-managed fulfilment is not tracked after purchase details are shared.</p>
           </div>
-          {draft.activationMode === "webhook" ? (
-            <>
-              {input("webhookUrl", "Webhook URL")}
-              {input("activationSla", "Activation SLA (hours)", "number")}
-            </>
-          ) : null}
         </div>
       </SectionCard>
     );
@@ -915,7 +890,7 @@ function ProductSections({
           {input("deviceFulfilment", "Fulfilment")}
         </div>
       </SectionCard>
-      <SectionCard id="bundle-terms" title="Leg B — Account" description="Set the regulated account terms and bundle completion rule." tags={["Account", "Settlement"]} invalid={Boolean(errors.disclosures)}>
+      <SectionCard id="bundle-terms" title="Leg B — Account" description="Set the regulated account terms. Pine owns any payment authorisation rules." tags={["Account", "Application"]} invalid={Boolean(errors.disclosures)}>
         <div className="grid gap-4 md:grid-cols-2">
           {input("regulatedEntity", "Regulated entity")}
           {input("licence", "RBI licence")}
@@ -935,19 +910,7 @@ function ProductSections({
             />
           </Field>
         </div>
-        <div className="mt-4 space-y-2">
-          <Label className="text-xs">Activation gate</Label>
-          {[
-            ["both", "Both legs complete (recommended)"],
-            ["account", "Account only"],
-            ["device", "Device only"],
-          ].map(([value, label], index) => (
-            <label key={value} className="flex gap-2 rounded-lg border p-3 text-xs">
-              <input id={index === 0 ? "activationGate" : undefined} type="radio" checked={draft.activationGate === value} onChange={() => update("activationGate", value)} />
-              {label}
-            </label>
-          ))}
-        </div>
+        <p className="mt-4 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">The application and any device payment event are recorded separately. Device fulfilment is not tracked in Partner Central.</p>
       </SectionCard>
       {compliance}
     </>

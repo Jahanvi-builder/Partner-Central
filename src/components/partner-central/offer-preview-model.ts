@@ -14,7 +14,7 @@ export const pinePreviewTemplates: PinePreviewTemplates = {
   securePayment: "Complete payment through Pine.",
   platformTerms: "Pine platform, payment, cancellation, and applicable refund terms apply.",
   privacyConsent: "Merchant details are shared with the partner only after consent is provided.",
-  bundleProtection: "Pine manages settlement holds, leg failures, reverse logistics, and eligible refunds.",
+  bundleProtection: "The account application and device payment are recorded separately. Later device fulfilment happens outside Partner Central.",
 };
 
 const lockedMerchantFields = [
@@ -72,12 +72,12 @@ function factsFor(draft: OfferDraft): PreviewFact[] {
       { label: "Offer price", value: money(draft.price), editTarget: edit("fulfilment", "price") },
       { label: "Fulfilment", value: draft.fulfilment, editTarget: edit("fulfilment", "fulfilment") },
       {
-        label: "Activation",
+        label: "After payment",
         value:
-          draft.activationMode === "immediate"
-            ? "Activated immediately after payment"
-            : `Partner confirmation within ${draft.activationSla} hours`,
-        editTarget: edit("fulfilment", "activationMode"),
+          draft.fulfilmentMode === "instant"
+            ? "Access is available immediately"
+            : "Partner-managed outside Partner Central",
+        editTarget: edit("fulfilment", "fulfilmentMode"),
       },
     ];
   }
@@ -112,19 +112,13 @@ function factsFor(draft: OfferDraft): PreviewFact[] {
 
 function workflowFor(draft: OfferDraft, templates: PinePreviewTemplates): PreviewStep[] {
   if (draft.type === "direct-buy") {
-    const steps: PreviewStep[] = [
+    return [
       { title: "Choose the offer", description: "Review the product, price, and fulfilment details.", editTarget: edit("overview", "headline") },
       { title: "Pay securely", description: templates.securePayment, editTarget: edit("fulfilment", "price") },
-      { title: "Receive your product", description: draft.fulfilment, editTarget: edit("fulfilment", "fulfilment") },
+      draft.fulfilmentMode === "instant"
+        ? { title: "Get instant access", description: "Access is available as soon as payment succeeds.", editTarget: edit("fulfilment", "fulfilmentMode") }
+        : { title: "Partner fulfils your purchase", description: `${draft.fulfilment}. Later progress is managed by the partner outside Partner Central.`, editTarget: edit("fulfilment", "fulfilment") },
     ];
-    if (draft.activationMode === "webhook") {
-      steps.push({
-        title: "Get activated",
-        description: `The partner confirms activation within ${draft.activationSla} hours.`,
-        editTarget: edit("fulfilment", "activationSla"),
-      });
-    }
-    return steps;
   }
 
   if (draft.type === "lead-gen") {
@@ -143,17 +137,11 @@ function workflowFor(draft: OfferDraft, templates: PinePreviewTemplates): Previe
     ];
   }
 
-  const completion =
-    draft.activationGate === "both"
-      ? "The bundle completes after both the device and account legs succeed."
-      : draft.activationGate === "account"
-        ? "The bundle completes when the account leg succeeds."
-        : "The bundle completes when the device leg succeeds.";
   return [
-    { title: "Commit to both legs", description: "Reserve the device and submit the account application together.", editTarget: edit("bundle-terms", "activationGate") },
-    { title: "Track both journeys", description: `${draft.deviceFulfilment}; ${draft.regulatedEntity} reviews the account application separately.`, editTarget: edit("fulfilment", "deviceFulfilment") },
-    { title: "Complete the bundle", description: completion, editTarget: edit("bundle-terms", "activationGate") },
-    { title: "Stay protected", description: templates.bundleProtection, editTarget: edit("bundle-terms", "activationGate") },
+    { title: "Submit both requests", description: "Send the account application and device request together.", editTarget: edit("interest-form") },
+    { title: "Bank reviews the application", description: `${draft.regulatedEntity} manages KYC and its decision.`, editTarget: edit("bundle-terms", "regulatedEntity") },
+    { title: "Payment is handled separately", description: "A device payment event appears only when Pine receives it from the payment system.", editTarget: edit("fulfilment", "devicePrice") },
+    { title: "Partner manages fulfilment", description: templates.bundleProtection, editTarget: edit("fulfilment", "deviceFulfilment") },
   ];
 }
 

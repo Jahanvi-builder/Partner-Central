@@ -1,8 +1,7 @@
 export type PartnerId = "petpooja" | "hdfc";
 export type OfferType = "direct-buy" | "financial" | "lead-gen" | "linked";
 export type OfferStatus = "Draft" | "Under review" | "Live" | "Rejected" | "Paused" | "Ended";
-export type ActivationMode = "immediate" | "webhook";
-export type ActivationGate = "both" | "account" | "device";
+export type FulfilmentMode = "instant" | "partner-managed";
 export type QuestionType = "short-text" | "single-select";
 export type OfferSectionId =
   | "overview"
@@ -15,15 +14,15 @@ export type OfferSectionId =
 
 export type AppView =
   | { kind: "overview" }
-  | { kind: "offers" }
+  | { kind: "offers"; offerId?: string }
   | { kind: "offer-type" }
   | { kind: "offer-details"; offerType: OfferType; section?: OfferSectionId; field?: string }
   | { kind: "offer-preview"; offerType: OfferType }
   | { kind: "offer-status"; offerId: string; status: "under-review" | "live" | "rejected" }
-  | { kind: "interests" }
-  | { kind: "interest-detail"; interestId: string }
-  | { kind: "orders" }
-  | { kind: "order-detail"; orderId: string };
+  | { kind: "engagements"; engagementType?: "all" | "lead" | "application"; offerId?: string }
+  | { kind: "engagement-detail"; engagementId: string }
+  | { kind: "orders"; offerId?: string; paymentStatus?: PaymentStatus }
+  | { kind: "order-detail"; paymentAttemptId: string };
 
 export interface PartnerProfile {
   id: PartnerId;
@@ -54,9 +53,7 @@ export interface OfferDraft {
   sku: string;
   price: string;
   fulfilment: string;
-  activationMode: ActivationMode;
-  webhookUrl: string;
-  activationSla: string;
+  fulfilmentMode: FulfilmentMode;
   regulatedEntity: string;
   licence: string;
   cin: string;
@@ -74,7 +71,6 @@ export interface OfferDraft {
   devicePrice: string;
   inventory: string;
   deviceFulfilment: string;
-  activationGate: ActivationGate;
   productMark: string;
   productMarkUrl: string;
   heroCreative: string;
@@ -88,6 +84,7 @@ export interface OfferDraft {
 
 export interface OfferRecord {
   id: string;
+  campaignId: string;
   partnerId: PartnerId;
   draftType: OfferType;
   name: string;
@@ -95,50 +92,106 @@ export interface OfferRecord {
   typeLabel: string;
   category: string;
   deal: string;
-  interests: number | null;
-  activated: number | null;
   status: OfferStatus;
+  performance: OfferPerformance;
+  engagedCount: number;
+  convertedCount: number;
+  validFrom: string;
+  validUntil: string;
+  revenue?: string;
+  attentionPriority: number;
+  attentionLabel?: string;
 }
 
-export type OrderStatus = "Order received" | "Installation scheduled" | "Merchant live" | "Declined";
+export type OfferPerformance =
+  | { kind: "direct-buy"; purchaseCount: number; revenue: string }
+  | { kind: "lead"; leadCount: number; convertedCount: number }
+  | { kind: "application"; applicationCount: number; approvedCount: number };
 
-export interface Order {
+export type PaymentStatus = "authorised" | "successful" | "failed" | "abandoned" | "refunded";
+
+export interface PaymentAttempt {
   id: string;
+  orderId?: string;
   partnerId: PartnerId;
+  offerId: string;
   merchant: string;
   contactName: string;
   email: string;
   gstin: string;
   consentAt: string;
   offer: string;
-  placed: string;
-  status: OrderStatus;
-  settlement: "Held" | "Released" | "—";
+  eventAt: string;
+  paymentStatus: PaymentStatus;
+  fulfilmentMode: FulfilmentMode;
   amount: string;
-  endpoint: string;
-  deliveryResult: string;
-  refund?: { reason: string; impact: string; status: string };
+  paymentReference?: string;
+  dataSharedAt?: string;
+  refund?: { confirmedAt: string; amount: string; reference: string };
+  bundleId?: string;
 }
 
-export type InterestStatus = "Interest captured" | "Contacted" | "Converted" | "Lost";
+export type LeadState = "SUBMITTED" | "CONTACTED" | "CONVERTED" | "CLOSED";
+export type ApplicationState = "SUBMITTED" | "UNDER_REVIEW" | "INFO_NEEDED" | "APPROVED" | "DECLINED" | "ACTIVE";
+export type SlaStatus = "healthy" | "due-soon" | "breached";
 
-export interface Interest {
+export interface EngagementHistoryItem {
+  label: string;
+  at: string;
+  detail: string;
+}
+
+interface EngagementBase {
   id: string;
   partnerId: PartnerId;
+  offerId: string;
+  offer: string;
   business: string;
+  submittedAt: string;
+  submittedOrder: number;
+  slaStatus: SlaStatus;
+  slaLabel: string;
+  consentShared: boolean;
   contactName: string;
   phone: string;
   email: string;
   taxId: string;
   city: string;
   category: string;
-  offer: string;
-  capturedAt: string;
-  capturedOrder: number;
-  consentShared: boolean;
-  status: InterestStatus;
   answers: Array<{ question: string; answer: string }>;
   note: string;
+  history: EngagementHistoryItem[];
+}
+
+export interface LeadEngagement extends EngagementBase {
+  kind: "lead";
+  state: LeadState;
+}
+
+export interface ApplicationEngagement extends EngagementBase {
+  kind: "application";
+  state: ApplicationState;
+  regulatedEntity: string;
+  bundleId?: string;
+  paymentAttemptId?: string;
+}
+
+export type Engagement = LeadEngagement | ApplicationEngagement;
+
+export interface OfferListFilters {
+  search: string;
+  status: "All" | OfferStatus;
+  type: "all" | OfferType;
+  category: string;
+}
+
+export interface EngagementListFilters {
+  kind: "all" | Engagement["kind"];
+  search: string;
+  offerId: string;
+  state: string;
+  sla: "all" | SlaStatus;
+  consent: "all" | "shared" | "not-shared";
 }
 
 export type DraftStore = Record<PartnerId, Partial<Record<OfferType, OfferDraft>>>;
