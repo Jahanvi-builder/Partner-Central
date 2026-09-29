@@ -28,6 +28,7 @@ export const offerTypeMeta: Record<OfferType, { title: string; eyebrow: string; 
 
 const common = {
   productMark: "",
+  productMarkUrl: "",
   activationMode: "webhook" as const,
   webhookUrl: "https://api.petpooja.in/pine/activation",
   activationSla: "4",
@@ -40,6 +41,7 @@ const common = {
   disclosures: "",
   dpdpConsent: false,
   mitcFile: "",
+  mitcUrl: "",
   complianceSignoff: false,
   postTrialPrice: "",
   contactSla: "",
@@ -48,6 +50,7 @@ const common = {
   inventory: "",
   deviceFulfilment: "",
   activationGate: "both" as const,
+  heroCreativeUrl: "",
 };
 
 export const initialDrafts: DraftStore = {
@@ -145,6 +148,7 @@ export const initialDrafts: DraftStore = {
       regulatedEntity: "HDFC Bank Limited",
       licence: "RBI licence · Scheduled commercial bank",
       cin: "L65920MH1994PLC080618",
+      productFamily: "HDFC Business Line",
       interestRange: "12% – 18%",
       creditCeiling: "1000000",
       disclosures: "APR, processing fee, penalty, cooling-off period and grievance contact.",

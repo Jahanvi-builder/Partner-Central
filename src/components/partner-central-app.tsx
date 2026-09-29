@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar"; import { Badge } from "@/components/ui/badge"; import { Button } from "@/components/ui/button"; import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
 import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from "@/components/ui/dialog"; import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuLabel,DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input"; import { Label } from "@/components/ui/label"; import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select"; import { Separator } from "@/components/ui/separator"; import { Table,TableBody,TableCell,TableHead,TableHeader,TableRow } from "@/components/ui/table"; import { Tabs,TabsContent,TabsList,TabsTrigger } from "@/components/ui/tabs"; import { Textarea } from "@/components/ui/textarea"; import { cn } from "@/lib/utils";
-import { cloneInitialDrafts,initialInterests,initialOffers,initialOrders,offerTypeMeta,partnerProfiles } from "./partner-central/data"; import { firstErrorSection,OfferDetails,OfferPreview,OfferTypeSelection,validateOfferDraft } from "./partner-central/offer-creation"; import type { AppView,CustomQuestion,DraftStore,Interest,OfferDraft,OfferRecord,OfferSectionId,OfferStatus,OfferType,Order,PartnerId } from "./partner-central/types";
+import { cloneInitialDrafts,initialInterests,initialOffers,initialOrders,offerTypeMeta,partnerProfiles } from "./partner-central/data"; import { firstErrorSection,OfferDetails,OfferPreview,OfferTypeSelection,validateOfferDraft } from "./partner-central/offer-creation"; import type { AppView,CustomQuestion,DraftStore,EditTarget,Interest,OfferDraft,OfferRecord,OfferStatus,OfferType,Order,PartnerId } from "./partner-central/types";
 
 type Errors=Record<string,string>; const primary="bg-[#1f3a22] text-white hover:bg-[#1f3a22]/90"; const icons={"direct-buy":ShoppingBagIcon,financial:Building2Icon,"lead-gen":MessageSquareTextIcon,linked:BoxesIcon};
 const money=(v:string)=>Number(v)>0?new Intl.NumberFormat("en-IN").format(Number(v)):"—"; const date=(v:string)=>v?new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(v+"T00:00:00Z")):"—";
@@ -99,6 +99,7 @@ export function PartnerCentralApp() {
         kind: "offer-details",
         offerType: submitted.type,
         section: firstErrorSection(errors),
+        field: Object.keys(errors)[0],
       });
       return;
     }
@@ -126,6 +127,7 @@ export function PartnerCentralApp() {
         draft={draft}
         setDraft={setDraft}
         initialSection={view.section}
+        initialField={view.field}
         restoreScrollY={editScroll[draft.type] ?? 0}
         onRememberScroll={(scrollY) => {
           setEditScroll((current) => ({ ...current, [draft.type]: scrollY }));
@@ -139,8 +141,13 @@ export function PartnerCentralApp() {
       <OfferPreview
         draft={draft}
         onBack={() => nav({ kind: "offer-details", offerType: draft.type }, false)}
-        onEdit={(section: OfferSectionId) =>
-          nav({ kind: "offer-details", offerType: draft.type, section })
+        onEdit={(target: EditTarget) =>
+          nav({
+            kind: "offer-details",
+            offerType: draft.type,
+            section: target.section,
+            field: target.field,
+          })
         }
         onPublish={() => publishFromPreview(draft)}
       />
@@ -164,7 +171,7 @@ export function PartnerCentralApp() {
               },
             },
           }));
-          nav({ kind: "offer-details", offerType: "lead-gen", section: "validity" });
+          nav({ kind: "offer-details", offerType: "lead-gen", section: "validity", field: "terms" });
         }}
       />
     );

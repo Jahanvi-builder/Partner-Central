@@ -17,7 +17,7 @@ export type AppView =
   | { kind: "overview" }
   | { kind: "offers" }
   | { kind: "offer-type" }
-  | { kind: "offer-details"; offerType: OfferType; section?: OfferSectionId }
+  | { kind: "offer-details"; offerType: OfferType; section?: OfferSectionId; field?: string }
   | { kind: "offer-preview"; offerType: OfferType }
   | { kind: "offer-status"; offerId: string; status: "under-review" | "live" | "rejected" }
   | { kind: "interests" }
@@ -66,6 +66,7 @@ export interface OfferDraft {
   disclosures: string;
   dpdpConsent: boolean;
   mitcFile: string;
+  mitcUrl: string;
   complianceSignoff: boolean;
   postTrialPrice: string;
   contactSla: string;
@@ -75,7 +76,9 @@ export interface OfferDraft {
   deviceFulfilment: string;
   activationGate: ActivationGate;
   productMark: string;
+  productMarkUrl: string;
   heroCreative: string;
+  heroCreativeUrl: string;
   validFrom: string;
   validUntil: string;
   terms: string;
@@ -139,3 +142,93 @@ export interface Interest {
 }
 
 export type DraftStore = Record<PartnerId, Partial<Record<OfferType, OfferDraft>>>;
+
+export type PreviewRegion =
+  | "card-copy"
+  | "card-artwork"
+  | "hero-copy"
+  | "hero-artwork"
+  | "about"
+  | "facts"
+  | "workflow"
+  | "summary"
+  | "commercial-terms"
+  | "regulatory-terms"
+  | "compliance"
+  | "merchant-form";
+
+export interface EditTarget {
+  section: OfferSectionId;
+  field?: string;
+}
+
+export interface PreviewFact {
+  label: string;
+  value: string;
+  group?: "Device" | "Account";
+  editTarget: EditTarget;
+}
+
+export interface PreviewStep {
+  title: string;
+  description: string;
+  editTarget: EditTarget;
+}
+
+export interface PreviewLegalItem {
+  title: string;
+  body: string;
+  href?: string;
+  actionLabel?: string;
+  editTarget?: EditTarget;
+}
+
+export interface MerchantCta {
+  label: string;
+  mode: "checkout" | "interest" | "application" | "bundle";
+}
+
+export interface PinePreviewTemplates {
+  securePayment: string;
+  platformTerms: string;
+  privacyConsent: string;
+  bundleProtection: string;
+}
+
+export interface MerchantOfferPreview {
+  card: {
+    partnerName: string;
+    partnerInitials: string;
+    typeLabel: string;
+    category: string;
+    headline: string;
+    benefit: string;
+    valueLine: string;
+    heroUrl?: string;
+    productMarkUrl?: string;
+  };
+  hero: {
+    partnerName: string;
+    partnerInitials: string;
+    typeLabel: string;
+    headline: string;
+    benefit: string;
+    availability: string;
+    valueLine: string;
+    heroUrl?: string;
+    productMarkUrl?: string;
+  };
+  about: string;
+  facts: PreviewFact[];
+  howItWorks: PreviewStep[];
+  summary: PreviewFact[];
+  legalItems: PreviewLegalItem[];
+  cta: MerchantCta;
+  merchantForm?: {
+    title: string;
+    lockedFields: string[];
+    questions: CustomQuestion[];
+    consentText: string;
+  };
+  editTargets: Record<PreviewRegion, EditTarget>;
+}

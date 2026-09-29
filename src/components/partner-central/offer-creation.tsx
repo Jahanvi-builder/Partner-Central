@@ -70,8 +70,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import { offerTypeMeta, partnerProfiles } from "./data";
+import { buildMerchantOfferPreview, pinePreviewTemplates } from "./offer-preview-model";
 import type {
   CustomQuestion,
+  EditTarget,
+  MerchantOfferPreview as MerchantOfferPreviewModel,
   OfferDraft,
   OfferSectionId,
   OfferType,
@@ -136,6 +139,18 @@ const fieldGuidance: Partial<Record<keyof OfferDraft, FieldGuidance>> = {
     hint: "Maximum time before your team contacts the merchant, in hours.",
   },
   productFamily: { placeholder: "e.g. Business line of credit" },
+  regulatedEntity: {
+    placeholder: "e.g. HDFC Bank Limited",
+    hint: "Legal entity that provides and decides the regulated product.",
+  },
+  licence: {
+    placeholder: "e.g. RBI licence · Scheduled commercial bank",
+    hint: "Merchant-facing regulator or licence description.",
+  },
+  cin: {
+    placeholder: "e.g. L65920MH1994PLC080618",
+    hint: "Corporate identity number shown in provider verification details.",
+  },
   interestRange: { placeholder: "e.g. 12%–18% p.a." },
   creditCeiling: {
     placeholder: "e.g. 1500000",
@@ -178,7 +193,7 @@ const sectionForField: Record<string, OfferSectionId> = {
   category: "overview",
   headline: "overview",
   benefit: "overview",
-  productDescription: "fulfilment",
+  productDescription: "overview",
   sku: "fulfilment",
   price: "fulfilment",
   fulfilment: "fulfilment",
@@ -186,6 +201,12 @@ const sectionForField: Record<string, OfferSectionId> = {
   activationSla: "fulfilment",
   postTrialPrice: "fulfilment",
   contactSla: "fulfilment",
+  regulatedEntity: "bundle-terms",
+  licence: "bundle-terms",
+  cin: "bundle-terms",
+  productFamily: "bundle-terms",
+  interestRange: "bundle-terms",
+  creditCeiling: "bundle-terms",
   deviceSku: "fulfilment",
   devicePrice: "fulfilment",
   inventory: "fulfilment",
@@ -210,23 +231,6 @@ const sectionLabels: Record<OfferSectionId, string> = {
   "interest-form": "Merchant form",
 };
 
-function money(value: string) {
-  return Number(value) > 0
-    ? new Intl.NumberFormat("en-IN").format(Number(value))
-    : "—";
-}
-
-function formatDate(value: string) {
-  return value
-    ? new Intl.DateTimeFormat("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      }).format(new Date(`${value}T00:00:00Z`))
-    : "—";
-}
-
 export function validateOfferDraft(draft: OfferDraft): Errors {
   const errors: Errors = {};
   const required: Array<keyof OfferDraft> = [
@@ -234,6 +238,7 @@ export function validateOfferDraft(draft: OfferDraft): Errors {
     "category",
     "headline",
     "benefit",
+    "productDescription",
     "heroCreative",
     "validFrom",
     "validUntil",
@@ -265,11 +270,14 @@ export function validateOfferDraft(draft: OfferDraft): Errors {
   }
 
   if (draft.type === "lead-gen") {
-    if (!draft.productDescription.trim()) errors.productDescription = "Required";
     if (Number(draft.contactSla) <= 0) errors.contactSla = "Enter a positive SLA";
   }
 
   if (draft.type === "financial" || draft.type === "linked") {
+    ["regulatedEntity", "licence", "cin", "productFamily", "interestRange"].forEach((key) => {
+      if (!String(draft[key as keyof OfferDraft] ?? "").trim()) errors[key] = "Required";
+    });
+    if (Number(draft.creditCeiling) <= 0) errors.creditCeiling = "Enter a positive credit ceiling";
     if (!draft.disclosures.trim()) errors.disclosures = "Required";
     if (!draft.mitcFile.toLowerCase().endsWith(".pdf")) {
       errors.mitcFile = "Upload the MITC as a PDF";
@@ -278,6 +286,8 @@ export function validateOfferDraft(draft: OfferDraft): Errors {
       errors.compliance = "Confirm consent and compliance";
     }
   }
+
+  if (draft.type === "financial" && !draft.sku.trim()) errors.sku = "Required";
 
   if (draft.type === "linked") {
     if (!draft.deviceSku.trim()) errors.deviceSku = "Required";
@@ -403,6 +413,7 @@ function Upload({
   id,
   label,
   value,
+  url,
   set,
   error,
   pdf = false,
@@ -411,7 +422,8 @@ function Upload({
   id: string;
   label: string;
   value: string;
-  set: (value: string) => void;
+  url?: string;
+  set: (value: string, url: string) => void;
   error?: string;
   pdf?: boolean;
   required?: boolean;
@@ -424,8 +436,11 @@ function Upload({
           error && "border-destructive",
         )}
       >
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
-          {value ? <ImageIcon className="size-4" /> : <UploadCloudIcon className="size-4" />}
+        <span
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted bg-cover bg-center"
+          style={!pdf && url ? { backgroundImage: `url(${url})` } : undefined}
+        >
+          {!url || pdf ? (value ? <ImageIcon className="size-4" /> : <UploadCloudIcon className="size-4" />) : null}
         </span>
         <span className="min-w-0 truncate text-xs font-medium">
           {value || "Drop files here or browse files"}
@@ -439,7 +454,13 @@ function Upload({
           type="file"
           accept={pdf ? "application/pdf" : "image/*"}
           {...fieldA11y(id, undefined, error)}
-          onChange={(event) => set(event.target.files?.[0]?.name || value)}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.addEventListener("load", () => set(file.name, String(reader.result ?? "")));
+            reader.readAsDataURL(file);
+          }}
         />
       </label>
     </Field>
@@ -753,7 +774,17 @@ function QuestionDesigner({ draft, setDraft, error }: { draft: OfferDraft; setDr
   );
 }
 
-function ProductSections({ draft, update, errors }: { draft: OfferDraft; update: (key: keyof OfferDraft, value: unknown) => void; errors: Errors }) {
+function ProductSections({
+  draft,
+  update,
+  updateMany,
+  errors,
+}: {
+  draft: OfferDraft;
+  update: (key: keyof OfferDraft, value: unknown) => void;
+  updateMany: (patch: Partial<OfferDraft>) => void;
+  errors: Errors;
+}) {
   const input = (key: keyof OfferDraft, label: string, type = "text") => {
     const id = String(key);
     const guidance = fieldGuidance[key];
@@ -786,9 +817,9 @@ function ProductSections({ draft, update, errors }: { draft: OfferDraft; update:
               {[
                 ["immediate", "Auto-activate immediately"],
                 ["webhook", "Wait for webhook callback"],
-              ].map(([value, label]) => (
+              ].map(([value, label], index) => (
                 <label key={value} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                  <input type="radio" checked={draft.activationMode === value} onChange={() => update("activationMode", value)} />
+                  <input id={index === 0 ? "activationMode" : undefined} type="radio" checked={draft.activationMode === value} onChange={() => update("activationMode", value)} />
                   {label}
                 </label>
               ))}
@@ -809,17 +840,6 @@ function ProductSections({ draft, update, errors }: { draft: OfferDraft; update:
     return (
       <SectionCard id="fulfilment" title="Product & follow-up" description="Explain the product and set the merchant contact expectation." tags={["Description", "SLA"]}>
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <Field id="productDescription" label="Product description" error={errors.productDescription} hint={fieldGuidance.productDescription?.hint}>
-              <Textarea
-                id="productDescription"
-                value={draft.productDescription}
-                placeholder={fieldGuidance.productDescription?.placeholder}
-                {...fieldA11y("productDescription", fieldGuidance.productDescription?.hint, errors.productDescription)}
-                onChange={(event) => update("productDescription", event.target.value)}
-              />
-            </Field>
-          </div>
           {input("postTrialPrice", "Post-trial price")}
           {input("contactSla", "Contact SLA (hours)", "number")}
         </div>
@@ -830,14 +850,22 @@ function ProductSections({ draft, update, errors }: { draft: OfferDraft; update:
   const compliance = (
     <SectionCard id="compliance" title="Consent & compliance" description="Attach the MITC and confirm regulatory readiness." tags={["DPDP", "MITC", "Sign-off"]} invalid={Boolean(errors.compliance || errors.mitcFile)}>
       <div className="grid gap-4 md:grid-cols-2">
-        <Upload id="mitcFile" label="MITC PDF" value={draft.mitcFile} set={(value) => update("mitcFile", value)} error={errors.mitcFile} pdf />
+        <Upload
+          id="mitcFile"
+          label="MITC PDF"
+          value={draft.mitcFile}
+          url={draft.mitcUrl}
+          set={(value, url) => updateMany({ mitcFile: value, mitcUrl: url })}
+          error={errors.mitcFile}
+          pdf
+        />
         <div className="space-y-2">
           {[
             ["dpdpConsent", "Attach DPDP consent"],
             ["complianceSignoff", "I confirm regulatory disclosures are accurate"],
           ].map(([key, label]) => (
             <label key={key} className="flex gap-3 rounded-lg border p-3 text-xs">
-              <input type="checkbox" checked={Boolean(draft[key as keyof OfferDraft])} onChange={(event) => update(key as keyof OfferDraft, event.target.checked)} />
+              <input id={key} type="checkbox" checked={Boolean(draft[key as keyof OfferDraft])} onChange={(event) => update(key as keyof OfferDraft, event.target.checked)} />
               {label}
             </label>
           ))}
@@ -852,10 +880,9 @@ function ProductSections({ draft, update, errors }: { draft: OfferDraft; update:
       <>
         <SectionCard id="bundle-terms" title="Regulated entity & product terms" description="Name the entity, pricing, and required RBI disclosures." tags={["RBI", "Credit terms"]} invalid={Boolean(errors.disclosures)}>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-lg border bg-muted/20 p-3 text-sm md:col-span-2">
-              <b>{draft.regulatedEntity}</b>
-              <small className="block text-muted-foreground">{draft.licence} · CIN {draft.cin}</small>
-            </div>
+            {input("regulatedEntity", "Regulated entity")}
+            {input("licence", "RBI licence")}
+            {input("cin", "CIN")}
             {input("sku", "Product SKU")}
             {input("productFamily", "Product family")}
             {input("interestRange", "Interest range")}
@@ -889,28 +916,34 @@ function ProductSections({ draft, update, errors }: { draft: OfferDraft; update:
         </div>
       </SectionCard>
       <SectionCard id="bundle-terms" title="Leg B — Account" description="Set the regulated account terms and bundle completion rule." tags={["Account", "Settlement"]} invalid={Boolean(errors.disclosures)}>
-        <div className="mb-4 rounded-lg border bg-muted/20 p-3 text-sm">
-          <b>{draft.regulatedEntity}</b>
-          <small className="block text-muted-foreground">Interest {draft.interestRange} · ceiling ₹{money(draft.creditCeiling)}</small>
+        <div className="grid gap-4 md:grid-cols-2">
+          {input("regulatedEntity", "Regulated entity")}
+          {input("licence", "RBI licence")}
+          {input("cin", "CIN")}
+          {input("productFamily", "Account product family")}
+          {input("interestRange", "Interest range")}
+          {input("creditCeiling", "Credit ceiling", "number")}
         </div>
-        <Field id="disclosures" label="RBI disclosures" error={errors.disclosures} hint={fieldGuidance.disclosures?.hint}>
-          <Textarea
-            id="disclosures"
-            value={draft.disclosures}
-            placeholder={fieldGuidance.disclosures?.placeholder}
-            {...fieldA11y("disclosures", fieldGuidance.disclosures?.hint, errors.disclosures)}
-            onChange={(event) => update("disclosures", event.target.value)}
-          />
-        </Field>
+        <div className="mt-4">
+          <Field id="disclosures" label="RBI disclosures" error={errors.disclosures} hint={fieldGuidance.disclosures?.hint}>
+            <Textarea
+              id="disclosures"
+              value={draft.disclosures}
+              placeholder={fieldGuidance.disclosures?.placeholder}
+              {...fieldA11y("disclosures", fieldGuidance.disclosures?.hint, errors.disclosures)}
+              onChange={(event) => update("disclosures", event.target.value)}
+            />
+          </Field>
+        </div>
         <div className="mt-4 space-y-2">
           <Label className="text-xs">Activation gate</Label>
           {[
             ["both", "Both legs complete (recommended)"],
             ["account", "Account only"],
             ["device", "Device only"],
-          ].map(([value, label]) => (
+          ].map(([value, label], index) => (
             <label key={value} className="flex gap-2 rounded-lg border p-3 text-xs">
-              <input type="radio" checked={draft.activationGate === value} onChange={() => update("activationGate", value)} />
+              <input id={index === 0 ? "activationGate" : undefined} type="radio" checked={draft.activationGate === value} onChange={() => update("activationGate", value)} />
               {label}
             </label>
           ))}
@@ -925,6 +958,7 @@ export function OfferDetails({
   draft,
   setDraft,
   initialSection,
+  initialField,
   restoreScrollY,
   onBack,
   onContinue,
@@ -933,6 +967,7 @@ export function OfferDetails({
   draft: OfferDraft;
   setDraft: DraftSetter;
   initialSection?: OfferSectionId;
+  initialField?: string;
   restoreScrollY: number;
   onBack: () => void;
   onContinue: () => void;
@@ -944,26 +979,34 @@ export function OfferDetails({
     const frame = window.requestAnimationFrame(() => {
       if (initialSection) {
         document.getElementById(`section-${initialSection}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-        const firstControl = document.querySelector<HTMLElement>(
-          `[data-offer-section="${initialSection}"] input, [data-offer-section="${initialSection}"] textarea, [data-offer-section="${initialSection}"] button`,
-        );
+        const requestedControl = initialField ? document.getElementById(initialField) : null;
+        const firstControl =
+          requestedControl ??
+          document.querySelector<HTMLElement>(
+            `[data-offer-section="${initialSection}"] input, [data-offer-section="${initialSection}"] textarea, [data-offer-section="${initialSection}"] button`,
+          );
         firstControl?.focus({ preventScroll: true });
       } else if (restoreScrollY > 0) {
         window.scrollTo({ top: restoreScrollY });
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [initialSection, restoreScrollY]);
+  }, [initialField, initialSection, restoreScrollY]);
 
-  const update = (key: keyof OfferDraft, value: unknown) => {
-    setDraft({ ...draft, [key]: value });
-    if (errors[String(key)]) {
+  const updateMany = (patch: Partial<OfferDraft>) => {
+    setDraft({ ...draft, ...patch });
+    const changedKeys = Object.keys(patch);
+    if (changedKeys.some((key) => errors[key])) {
       setErrors((current) => {
         const next = { ...current };
-        delete next[String(key)];
+        changedKeys.forEach((key) => delete next[key]);
         return next;
       });
     }
+  };
+
+  const update = (key: keyof OfferDraft, value: unknown) => {
+    updateMany({ [key]: value } as Partial<OfferDraft>);
   };
 
   const submit = (event: React.FormEvent) => {
@@ -1035,10 +1078,30 @@ export function OfferDetails({
                   />
                 </Field>
               ))}
+              <div className="md:col-span-3">
+                <Field
+                  id="productDescription"
+                  label="Product description"
+                  error={errors.productDescription}
+                  hint="This becomes the About this offer section on the merchant details page."
+                >
+                  <Textarea
+                    id="productDescription"
+                    value={draft.productDescription}
+                    placeholder={fieldGuidance.productDescription?.placeholder}
+                    {...fieldA11y(
+                      "productDescription",
+                      "This becomes the About this offer section on the merchant details page.",
+                      errors.productDescription,
+                    )}
+                    onChange={(event) => update("productDescription", event.target.value)}
+                  />
+                </Field>
+              </div>
             </div>
           </SectionCard>
 
-          <ProductSections draft={draft} update={update} errors={errors} />
+          <ProductSections draft={draft} update={update} updateMany={updateMany} errors={errors} />
 
           <SectionCard id="assets" title="Visual assets" description="Upload the brand and campaign artwork merchants will see." tags={["Logo", "Offer creative"]} invalid={Boolean(errors.heroCreative)}>
             <div className="grid gap-4 md:grid-cols-3">
@@ -1049,8 +1112,22 @@ export function OfferDetails({
                   <span className="text-xs font-medium">{profile.name}<small className="block font-normal text-muted-foreground">From Marketplace profile</small></span>
                 </div>
               </div>
-              <Upload id="productMark" label="Product image" value={draft.productMark} set={(value) => update("productMark", value)} required={false} />
-              <Upload id="heroCreative" label="Hero creative" value={draft.heroCreative} set={(value) => update("heroCreative", value)} error={errors.heroCreative} />
+              <Upload
+                id="productMark"
+                label="Product image"
+                value={draft.productMark}
+                url={draft.productMarkUrl}
+                set={(value, url) => updateMany({ productMark: value, productMarkUrl: url })}
+                required={false}
+              />
+              <Upload
+                id="heroCreative"
+                label="Hero creative"
+                value={draft.heroCreative}
+                url={draft.heroCreativeUrl}
+                set={(value, url) => updateMany({ heroCreative: value, heroCreativeUrl: url })}
+                error={errors.heroCreative}
+              />
             </div>
           </SectionCard>
 
@@ -1103,20 +1180,22 @@ export function OfferDetails({
   );
 }
 
-function MerchantFormPreview({ draft }: { draft: OfferDraft }) {
+function MerchantFormPreview({ preview }: { preview: MerchantOfferPreviewModel }) {
+  const form = preview.merchantForm;
+  if (!form) return null;
   return (
     <div className="space-y-4 overflow-y-auto px-4 pb-6">
       <div className="rounded-xl bg-[#eef5df] p-4">
-        <Badge variant="outline" className="bg-background">{offerTypeMeta[draft.type].title}</Badge>
-        <h3 className="mt-3 text-lg font-semibold">{draft.headline}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{draft.benefit}</p>
+        <Badge variant="outline" className="bg-background">{preview.card.typeLabel}</Badge>
+        <h3 className="mt-3 text-lg font-semibold">{preview.card.headline}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{preview.card.benefit}</p>
       </div>
-      {["Business name", "Contact person", "Mobile", "Email", "GST / PAN", "City"].map((field) => (
+      {form.lockedFields.map((field) => (
         <Field key={field} id={`preview-${field}`} label={field} required={["Business name", "Contact person", "Mobile"].includes(field)}>
           <Input id={`preview-${field}`} disabled placeholder="Merchant response" />
         </Field>
       ))}
-      {draft.questions.map((question) => (
+      {form.questions.map((question) => (
         <Field key={question.id} id={`preview-${question.id}`} label={question.label} required={question.required}>
           {question.type === "single-select" ? (
             <Select disabled><SelectTrigger className="w-full"><SelectValue placeholder="Select an option" /></SelectTrigger><SelectContent>{question.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select>
@@ -1127,25 +1206,71 @@ function MerchantFormPreview({ draft }: { draft: OfferDraft }) {
       ))}
       <label className="flex gap-2 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
         <input type="checkbox" disabled />
-        I agree to share my details with {partnerProfiles[draft.partnerId].name}.
+        {form.consentText}
       </label>
-      <Button disabled className={cn("w-full", primary)}>Submit application</Button>
+      <Button disabled className={cn("w-full", primary)}>{preview.cta.label}</Button>
       <p className="text-center text-[10px] text-muted-foreground">Preview only · No information will be submitted</p>
     </div>
   );
 }
 
-function EditButton({ section, onEdit }: { section: OfferSectionId; onEdit: (section: OfferSectionId) => void }) {
+function CheckoutPreview({ preview }: { preview: MerchantOfferPreviewModel }) {
   return (
-    <Button variant="outline" size="sm" className="bg-background/95" onClick={() => onEdit(section)}>
-      <PencilIcon /> Edit
+    <div className="space-y-5 px-4 pb-6">
+      <div className="rounded-xl border p-4">
+        <p className="text-xs text-muted-foreground">You’re buying</p>
+        <h3 className="mt-2 font-semibold">{preview.card.headline}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{preview.card.partnerName}</p>
+        <Separator className="my-4" />
+        <div className="flex items-center justify-between text-sm">
+          <span>Offer total</span>
+          <b>{preview.card.valueLine}</b>
+        </div>
+      </div>
+      <div className="rounded-xl bg-muted/40 p-4 text-xs leading-5 text-muted-foreground">
+        Payment, merchant consent, and order confirmation will appear here in the live checkout.
+      </div>
+      <Button disabled className={cn("w-full", primary)}>Pay securely</Button>
+      <p className="text-center text-[10px] text-muted-foreground">Preview only · No payment will be collected</p>
+    </div>
+  );
+}
+
+function EditButton({ target, onEdit, label = "Edit" }: { target: EditTarget; onEdit: (target: EditTarget) => void; label?: string }) {
+  return (
+    <Button variant="outline" size="sm" className="bg-background/95" onClick={() => onEdit(target)}>
+      <PencilIcon /> {label}
     </Button>
   );
 }
 
-function MarketplaceCard({ draft, onEdit, onOpen }: { draft: OfferDraft; onEdit: (section: OfferSectionId) => void; onOpen: () => void }) {
-  const profile = partnerProfiles[draft.partnerId];
-  const price = draft.type === "linked" ? draft.devicePrice : draft.price;
+function MerchantArtwork({ preview, large = false }: { preview: MerchantOfferPreviewModel; large?: boolean }) {
+  const artwork = large ? preview.hero : preview.card;
+  return (
+    <div
+      role="img"
+      aria-label={`${artwork.headline} offer creative`}
+      className={cn("relative flex items-center justify-center bg-[#e9f4d4] bg-cover bg-center", large ? "min-h-72" : "min-h-48")}
+      style={artwork.heroUrl ? { backgroundImage: `url(${artwork.heroUrl})` } : undefined}
+    >
+      {!artwork.heroUrl ? (
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-[#1f3a22] text-2xl font-bold text-white">
+          {artwork.partnerInitials}
+        </div>
+      ) : null}
+      {artwork.productMarkUrl ? (
+        <div
+          role="img"
+          aria-label="Product mark"
+          className="absolute bottom-4 left-4 size-14 rounded-xl border bg-white bg-contain bg-center bg-no-repeat shadow-sm"
+          style={{ backgroundImage: `url(${artwork.productMarkUrl})` }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function MarketplaceCard({ preview, onEdit, onOpen }: { preview: MerchantOfferPreviewModel; onEdit: (target: EditTarget) => void; onOpen: () => void }) {
   return (
     <div className="rounded-2xl border bg-[#f6f6f1] p-4 md:p-8">
       <div className="mx-auto max-w-5xl">
@@ -1161,18 +1286,19 @@ function MarketplaceCard({ draft, onEdit, onOpen }: { draft: OfferDraft; onEdit:
         </div>
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="relative overflow-hidden py-0 shadow-md md:col-span-2 lg:col-span-1">
-            <div className="absolute right-3 top-3 z-10"><EditButton section="overview" onEdit={onEdit} /></div>
-            <div className="flex min-h-48 items-center justify-center bg-[#e9f4d4]">
-              <div className="flex size-16 items-center justify-center rounded-2xl bg-[#1f3a22] text-2xl font-bold text-white">{profile.initials}</div>
+            <div className="absolute right-3 top-3 z-10 flex gap-2">
+              <EditButton target={preview.editTargets["card-copy"]} onEdit={onEdit} label="Copy" />
+              <EditButton target={preview.editTargets["card-artwork"]} onEdit={onEdit} label="Creative" />
             </div>
+            <MerchantArtwork preview={preview} />
             <CardContent className="p-5">
-              <Badge variant="outline">{offerTypeMeta[draft.type].title}</Badge>
-              <p className="mt-4 text-[11px] text-muted-foreground">{profile.name} · {draft.category}</p>
-              <h3 className="mt-2 text-lg font-semibold">{draft.headline}</h3>
-              <p className="mt-2 text-sm text-muted-foreground">{draft.benefit}</p>
+              <Badge variant="outline">{preview.card.typeLabel}</Badge>
+              <p className="mt-4 text-[11px] text-muted-foreground">{preview.card.partnerName} · {preview.card.category}</p>
+              <h3 className="mt-2 text-lg font-semibold">{preview.card.headline}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{preview.card.benefit}</p>
               <Separator className="my-5" />
               <div className="flex items-end justify-between gap-3">
-                {price ? <div><small className="block text-muted-foreground">Offer price</small><b className="text-lg">₹{money(price)}</b></div> : <span />}
+                <div><small className="block text-muted-foreground">Offer value</small><b className="text-sm">{preview.card.valueLine}</b></div>
                 <Button className={primary} onClick={onOpen}>View offer</Button>
               </div>
             </CardContent>
@@ -1189,31 +1315,30 @@ function MarketplaceCard({ draft, onEdit, onOpen }: { draft: OfferDraft; onEdit:
   );
 }
 
-function DetailsPage({ draft, onEdit, onApply }: { draft: OfferDraft; onEdit: (section: OfferSectionId) => void; onApply: () => void }) {
-  const profile = partnerProfiles[draft.partnerId];
-  const price = draft.type === "linked" ? draft.devicePrice : draft.price;
-  const cta = draft.type === "direct-buy" ? "Buy now" : draft.type === "lead-gen" ? "I’m interested" : draft.type === "financial" ? "Apply · takes 2 min" : "Reserve device + Apply";
+function DetailsPage({ preview, onEdit, onApply }: { preview: MerchantOfferPreviewModel; onEdit: (target: EditTarget) => void; onApply: () => void }) {
   return (
     <div className="overflow-hidden rounded-2xl border bg-background">
-      <div className="relative bg-[#e9f4d4] px-5 py-12 md:px-10 md:py-16">
-        <div className="absolute right-4 top-4"><EditButton section="assets" onEdit={onEdit} /></div>
-        <div className="mx-auto grid max-w-5xl gap-7 md:grid-cols-[1fr_320px] md:items-center">
+      <div className="relative overflow-hidden bg-[#e9f4d4]">
+        {preview.hero.heroUrl ? <div className="absolute inset-0 opacity-20"><MerchantArtwork preview={preview} large /></div> : null}
+        <div className="absolute right-4 top-4 z-10 flex gap-2"><EditButton target={preview.editTargets["hero-copy"]} onEdit={onEdit} label="Copy" /><EditButton target={preview.editTargets["hero-artwork"]} onEdit={onEdit} label="Creative" /></div>
+        <div className="relative mx-auto grid max-w-5xl gap-7 px-5 py-12 md:grid-cols-[1fr_320px] md:items-center md:px-10 md:py-16">
           <div>
-            <div className="mb-5 flex items-center gap-3"><Avatar><AvatarFallback className="bg-[#1f3a22] text-white">{profile.initials}</AvatarFallback></Avatar><span className="text-sm font-medium">{profile.name}</span></div>
-            <Badge variant="outline" className="bg-background/70">{offerTypeMeta[draft.type].title}</Badge>
-            <h2 className="mt-4 max-w-2xl text-3xl font-semibold tracking-tight md:text-4xl">{draft.headline}</h2>
-            <p className="mt-3 max-w-xl text-sm text-muted-foreground md:text-base">{draft.benefit}</p>
+            <div className="mb-5 flex items-center gap-3"><Avatar><AvatarFallback className="bg-[#1f3a22] text-white">{preview.hero.partnerInitials}</AvatarFallback></Avatar><span className="text-sm font-medium">{preview.hero.partnerName}</span></div>
+            <Badge variant="outline" className="bg-background/70">{preview.hero.typeLabel}</Badge>
+            <h2 className="mt-4 max-w-2xl text-3xl font-semibold tracking-tight md:text-4xl">{preview.hero.headline}</h2>
+            <p className="mt-3 max-w-xl text-sm text-muted-foreground md:text-base">{preview.hero.benefit}</p>
           </div>
-          <Card className="shadow-lg"><CardContent><p className="text-xs text-muted-foreground">Available until {formatDate(draft.validUntil)}</p>{price ? <p className="mt-3 text-2xl font-semibold">₹{money(price)}</p> : null}<Button className={cn("mt-5 w-full", primary)} onClick={onApply}>{cta}</Button><p className="mt-3 text-center text-[10px] text-muted-foreground">Securely powered by Pine Labs</p></CardContent></Card>
+          <Card className="shadow-lg"><CardContent><p className="text-xs text-muted-foreground">{preview.hero.availability}</p><p className="mt-3 text-xl font-semibold">{preview.hero.valueLine}</p><Button className={cn("mt-5 w-full", primary)} onClick={onApply}>{preview.cta.label}</Button><p className="mt-3 text-center text-[10px] text-muted-foreground">Securely powered by Pine Labs</p></CardContent></Card>
         </div>
       </div>
       <div className="mx-auto grid max-w-5xl gap-8 px-5 py-8 md:grid-cols-[1fr_300px] md:px-10 md:py-12">
         <div className="space-y-8">
-          <section className="relative rounded-xl border p-5"><div className="absolute right-3 top-3"><EditButton section="overview" onEdit={onEdit} /></div><h3 className="pr-20 text-lg font-semibold">About this offer</h3><p className="mt-3 text-sm leading-6 text-muted-foreground">{draft.productDescription || draft.benefit}</p></section>
-          <section className="relative rounded-xl border p-5"><div className="absolute right-3 top-3"><EditButton section={draft.type === "financial" || draft.type === "linked" ? "bundle-terms" : "fulfilment"} onEdit={onEdit} /></div><h3 className="pr-20 text-lg font-semibold">How it works</h3><div className="mt-4 grid gap-3 sm:grid-cols-3">{["Choose the offer", draft.type === "direct-buy" ? "Pay securely" : "Share your details", draft.type === "direct-buy" ? "Get activated" : "Partner follows up"].map((step, index) => <div key={step} className="rounded-lg bg-muted/40 p-3 text-xs"><span className="mb-2 flex size-6 items-center justify-center rounded-full bg-[#1f3a22] text-[10px] text-white">{index + 1}</span>{step}</div>)}</div></section>
-          <section className="relative rounded-xl border p-5"><div className="absolute right-3 top-3"><EditButton section="validity" onEdit={onEdit} /></div><h3 className="pr-20 text-lg font-semibold">Terms & conditions</h3><p className="mt-3 text-sm leading-6 text-muted-foreground">{draft.terms}</p></section>
+          <section className="relative rounded-xl border p-5"><div className="absolute right-3 top-3"><EditButton target={preview.editTargets.about} onEdit={onEdit} /></div><h3 className="pr-20 text-lg font-semibold">About this offer</h3><p className="mt-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">{preview.about}</p></section>
+          <section className="rounded-xl border p-5"><h3 className="text-lg font-semibold">Offer details</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{preview.facts.map((fact) => <div key={`${fact.group ?? "Offer"}-${fact.label}`} className="relative rounded-lg bg-muted/40 p-3 pr-12 text-xs">{fact.group ? <Badge variant="outline" className="mb-2 text-[9px]">{fact.group}</Badge> : null}<p className="text-muted-foreground">{fact.label}</p><p className="mt-1 font-medium">{fact.value}</p><Button type="button" size="icon-sm" variant="ghost" className="absolute right-2 top-2" aria-label={`Edit ${fact.label}`} onClick={() => onEdit(fact.editTarget)}><PencilIcon /></Button></div>)}</div></section>
+          <section className="rounded-xl border p-5"><h3 className="text-lg font-semibold">How it works</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{preview.howItWorks.map((step, index) => <div key={step.title} className="relative rounded-lg bg-muted/40 p-3 pr-11 text-xs"><span className="mb-2 flex size-6 items-center justify-center rounded-full bg-[#1f3a22] text-[10px] text-white">{index + 1}</span><b>{step.title}</b><p className="mt-1 leading-5 text-muted-foreground">{step.description}</p><Button type="button" size="icon-sm" variant="ghost" className="absolute right-2 top-2" aria-label={`Edit ${step.title}`} onClick={() => onEdit(step.editTarget)}><PencilIcon /></Button></div>)}</div></section>
+          <section className="rounded-xl border p-5"><h3 className="text-lg font-semibold">Terms & legal</h3><div className="mt-4 divide-y">{preview.legalItems.map((item) => <div key={item.title} className="relative py-4 pr-12 first:pt-0 last:pb-0"><h4 className="text-sm font-medium">{item.title}</h4><p className="mt-1 whitespace-pre-line text-xs leading-5 text-muted-foreground">{item.body}</p>{item.href ? <a className="mt-2 inline-flex text-xs font-medium text-[#1f3a22] underline-offset-4 hover:underline" href={item.href} target="_blank" rel="noreferrer">{item.actionLabel}</a> : item.actionLabel ? <p className="mt-2 text-[10px] text-muted-foreground">Document becomes available after a PDF is uploaded.</p> : null}{item.editTarget ? <Button type="button" size="icon-sm" variant="ghost" className="absolute right-0 top-3" aria-label={`Edit ${item.title}`} onClick={() => onEdit(item.editTarget!)}><PencilIcon /></Button> : null}</div>)}</div></section>
         </div>
-        <aside className="space-y-4"><Card className="shadow-none"><CardContent><p className="text-xs font-medium">Offer summary</p><dl className="mt-4 space-y-3 text-xs"><div><dt className="text-muted-foreground">Category</dt><dd className="mt-1 font-medium">{draft.category}</dd></div><div><dt className="text-muted-foreground">Validity</dt><dd className="mt-1 font-medium">{formatDate(draft.validFrom)} – {formatDate(draft.validUntil)}</dd></div><div><dt className="text-muted-foreground">Fulfilment</dt><dd className="mt-1 font-medium">{draft.type === "linked" ? draft.deviceFulfilment : draft.fulfilment || "Partner follow-up"}</dd></div></dl></CardContent></Card><div className="rounded-xl bg-muted/40 p-4 text-xs text-muted-foreground">Track progress at any time from My deals.</div></aside>
+        <aside className="space-y-4"><Card className="shadow-none"><CardContent><p className="text-xs font-medium">Offer summary</p><dl className="mt-4 divide-y text-xs">{preview.summary.map((fact) => <div key={fact.label} className="relative py-3 pr-8 first:pt-0 last:pb-0"><dt className="text-muted-foreground">{fact.label}</dt><dd className="mt-1 font-medium">{fact.value}</dd><Button type="button" size="icon-sm" variant="ghost" className="absolute right-0 top-2" aria-label={`Edit ${fact.label}`} onClick={() => onEdit(fact.editTarget)}><PencilIcon /></Button></div>)}</dl></CardContent></Card><div className="rounded-xl bg-muted/40 p-4 text-xs text-muted-foreground">Track progress at any time from My deals.</div></aside>
       </div>
     </div>
   );
@@ -1227,18 +1352,17 @@ export function OfferPreview({
 }: {
   draft: OfferDraft;
   onBack: () => void;
-  onEdit: (section: OfferSectionId) => void;
+  onEdit: (target: EditTarget) => void;
   onPublish: () => void;
 }) {
   const [mode, setMode] = React.useState<"card" | "detail">("card");
   const [formOpen, setFormOpen] = React.useState(false);
+  const preview = buildMerchantOfferPreview(draft, partnerProfiles[draft.partnerId], pinePreviewTemplates);
 
   const openJourney = () => {
     if (mode === "card") {
       setMode("detail");
       window.scrollTo({ top: 0, behavior: "smooth" });
-    } else if (draft.type === "direct-buy") {
-      toast.info("Checkout is disabled in preview mode.");
     } else {
       setFormOpen(true);
     }
@@ -1254,7 +1378,7 @@ export function OfferPreview({
           <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{draft.offerName}</p><p className="text-[11px] text-muted-foreground">Step 2 of 2 · Preview as a merchant</p></div>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="md:hidden" />}><PencilIcon /> Edit section</DropdownMenuTrigger>
-            <DropdownMenuContent align="end"><DropdownMenuLabel>Return to details</DropdownMenuLabel>{(Object.keys(sectionLabels) as OfferSectionId[]).filter((section) => draft.type !== "direct-buy" || section !== "interest-form").map((section) => <DropdownMenuItem key={section} onClick={() => onEdit(section)}>{sectionLabels[section]}</DropdownMenuItem>)}</DropdownMenuContent>
+            <DropdownMenuContent align="end"><DropdownMenuLabel>Return to details</DropdownMenuLabel>{(Object.keys(sectionLabels) as OfferSectionId[]).filter((section) => draft.type !== "direct-buy" || section !== "interest-form").map((section) => <DropdownMenuItem key={section} onClick={() => onEdit({ section })}>{sectionLabels[section]}</DropdownMenuItem>)}</DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" onClick={() => toast.success("Draft saved for this session.")}>Save draft</Button>
           <Button size="sm" className={primary} onClick={onPublish}><GiftIcon /> Publish offer</Button>
@@ -1269,18 +1393,18 @@ export function OfferPreview({
           </Tabs>
         </div>
         <Tabs value={mode} onValueChange={(value) => setMode(value as "card" | "detail")}>
-          <TabsContent value="card"><MarketplaceCard draft={draft} onEdit={onEdit} onOpen={openJourney} /></TabsContent>
-          <TabsContent value="detail"><DetailsPage draft={draft} onEdit={onEdit} onApply={openJourney} /></TabsContent>
+          <TabsContent value="card"><MarketplaceCard preview={preview} onEdit={onEdit} onOpen={openJourney} /></TabsContent>
+          <TabsContent value="detail"><DetailsPage preview={preview} onEdit={onEdit} onApply={openJourney} /></TabsContent>
         </Tabs>
       </div>
 
       <Sheet open={formOpen} onOpenChange={setFormOpen}>
         <SheetContent side="right" className="!w-full sm:!max-w-xl">
           <SheetHeader className="border-b">
-            <SheetTitle>Merchant {draft.type === "financial" ? "application" : "interest"} form</SheetTitle>
+            <SheetTitle>{preview.merchantForm?.title ?? "Secure checkout"}</SheetTitle>
             <SheetDescription>This is the exact form opened by the campaign CTA.</SheetDescription>
           </SheetHeader>
-          <MerchantFormPreview draft={draft} />
+          {preview.merchantForm ? <MerchantFormPreview preview={preview} /> : <CheckoutPreview preview={preview} />}
         </SheetContent>
       </Sheet>
     </>
